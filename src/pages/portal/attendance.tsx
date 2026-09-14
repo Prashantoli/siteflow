@@ -81,11 +81,11 @@ export default function AttendancePage() {
             {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </div>
-        <div>
-          <div className="!w-44"><DualDatePicker label="From" value={from} onChange={setFrom} /></div>
+        <div className="w-64">
+          <DualDatePicker label="From" value={from} onChange={setFrom} />
         </div>
-        <div>
-          <div className="!w-44"><DualDatePicker label="To" value={to} onChange={setTo} /></div>
+        <div className="w-64">
+          <DualDatePicker label="To" value={to} onChange={setTo} />
         </div>
         <a className="btn-outline" href={`/api/reports/export?type=attendance`} target="_blank">⬇ Export CSV</a>
       </div>

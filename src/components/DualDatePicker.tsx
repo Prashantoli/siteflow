@@ -142,7 +142,7 @@ export default function DualDatePicker({
       {label ? <label className="label">{label}</label> : null}
       <div className="flex items-center gap-2">
         <input
-          className="input flex-1 cursor-pointer"
+          className="input min-w-0 flex-1 cursor-pointer"
           type={mode === "AD" ? "date" : "text"}
           readOnly={mode === "BS"}
           placeholder={mode === "BS" ? "Pick a date (BS)" : ""}
