@@ -3,7 +3,7 @@ import { getSession } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
 import Shell from "@/components/Shell";
 import DualDatePicker from "@/components/DualDatePicker";
-import { Modal, Badge, StatCard, EmptyState } from "@/components/ui";
+import { Modal, Badge, StatCard, EmptyState, CurrencySelect, useBaseCurrency } from "@/components/ui";
 import { SO_STATUS_LABEL, SO_STATUS_COLOR, NEPAL_VAT_PERCENT } from "@/lib/orders";
 import { formatDual } from "@/lib/nepal";
 import { homeFor, isManagement } from "@/lib/rbac";
@@ -32,6 +32,10 @@ export default function SalesOrdersPage() {
     taxPercent: String(NEPAL_VAT_PERCENT), discountAmount: "0", currency: "NPR", notes: "",
     items: [{ ...emptyItem }],
   });
+  const base = useBaseCurrency();
+  useEffect(() => {
+    setForm((f) => (f.currency === "NPR" ? { ...f, currency: base } : f));
+  }, [base]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -192,9 +196,7 @@ export default function SalesOrdersPage() {
             </div>
             <div>
               <label className="label">Currency</label>
-              <select className="input" value={form.currency} onChange={(e) => setForm({ ...form, currency: e.target.value })}>
-                {["NPR", "USD", "INR", "EUR", "GBP", "AED", "SAR", "QAR", "CNY"].map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <CurrencySelect value={form.currency} onChange={(currency) => setForm({ ...form, currency })} />
             </div>
             <div><DualDatePicker label="Order date" value={form.orderDate} onChange={(v) => setForm({ ...form, orderDate: v })} /></div>
             <div><DualDatePicker label="Delivery date" value={form.deliveryDate} onChange={(v) => setForm({ ...form, deliveryDate: v })} /></div>

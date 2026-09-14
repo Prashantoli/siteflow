@@ -2,7 +2,7 @@ import { GetServerSidePropsContext } from "next";
 import { getSession } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
 import Shell from "@/components/Shell";
-import { Modal, Badge, StatCard, EmptyState } from "@/components/ui";
+import { Modal, Badge, StatCard, EmptyState, moneySym, useBaseCurrency } from "@/components/ui";
 import { homeFor, isManagement } from "@/lib/rbac";
 
 type Item = {
@@ -13,6 +13,7 @@ type Item = {
 const emptyForm = { code: "", name: "", category: "", unit: "nos", stockQty: "0", minStock: "0", lastPrice: "0" };
 
 export default function InventoryPage() {
+  const base = useBaseCurrency();
   const [items, setItems] = useState<Item[]>([]);
   const [q, setQ] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
@@ -78,7 +79,7 @@ export default function InventoryPage() {
     <Shell title="Inventory" subtitle="Materials master — stock levels and editable prices (market rates fluctuate)">
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         <StatCard label="Items" value={items.length} accent="blue" />
-        <StatCard label="Stock Value (at avg cost)" value={`Rs. ${stockValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`} accent="brand" />
+        <StatCard label={`Stock Value (at avg cost, ${base})`} value={stockValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })} accent="brand" sub="Values shown in base currency" />
         <StatCard label="Low Stock Alerts" value={lowCount} accent={lowCount > 0 ? "red" : "emerald"} />
         <StatCard label="Archived" value={items.filter((i) => !i.isActive).length} accent="slate" />
       </div>
@@ -121,8 +122,8 @@ export default function InventoryPage() {
                     {i.stockQty <= i.minStock && <Badge className="ml-1 bg-red-100 text-red-700">LOW</Badge>}
                   </td>
                   <td className="td text-slate-500">{i.minStock}</td>
-                  <td className="td">Rs. {i.avgCost.toLocaleString("en-IN")}</td>
-                  <td className="td">Rs. {i.lastPrice.toLocaleString("en-IN")}</td>
+                  <td className="td">{moneySym(i.avgCost, base)}</td>
+                  <td className="td">{moneySym(i.lastPrice, base)}</td>
                   <td className="td">
                     <div className="flex gap-1.5">
                       <button className="btn-outline !px-2.5 !py-1 text-[11px]" onClick={() => openEdit(i)}>Edit</button>

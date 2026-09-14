@@ -3,7 +3,7 @@ import { getSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import Shell from "@/components/Shell";
 import DualDatePicker from "@/components/DualDatePicker";
-import { Modal, Badge, Progress, money, fmtDate, EmptyState } from "@/components/ui";
+import { Modal, Badge, Progress, money, fmtDate, EmptyState, useBaseCurrency } from "@/components/ui";
 import { homeFor, isManagement } from "@/lib/rbac";
 
 type Site = {
@@ -23,6 +23,7 @@ const STATUS_COLOR: Record<string, string> = {
 const emptyForm = { name: "", code: "", address: "", city: "", lat: "", lng: "", radiusM: "150", budget: "0", managerId: "", startDate: "", endDate: "", description: "", status: "ACTIVE" };
 
 export default function SitesPage({ canEdit }: { canEdit: boolean }) {
+  const base = useBaseCurrency();
   const [sites, setSites] = useState<Site[]>([]);
   const [managers, setManagers] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,7 +136,7 @@ export default function SitesPage({ canEdit }: { canEdit: boolean }) {
                   <p className="text-[10px] uppercase text-slate-400">Tasks</p>
                 </div>
                 <div className="rounded-lg bg-slate-50 p-2">
-                  <p className="text-base font-bold text-slate-800">{money(s.budget)}</p>
+                  <p className="text-base font-bold text-slate-800">{money(s.budget, base)}</p>
                   <p className="text-[10px] uppercase text-slate-400">Budget</p>
                 </div>
               </div>

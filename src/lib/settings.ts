@@ -54,7 +54,7 @@ export async function getCompany() {
     email: s["company.email"] || "",
     phone: s["company.phone"] || "",
     address: s["company.address"] || "",
-    currency: s["billing.currency"] || "USD",
+    currency: s["billing.currency"] || "NPR",
   };
 }
 

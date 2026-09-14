@@ -1,5 +1,35 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState, useCallback } from "react";
 import { clsx } from "clsx";
+import { CURRENCIES, formatMoney, currencySymbol } from "@/lib/currency";
+
+/**
+ * Base-currency hook: reads the company default currency from settings
+ * (fetched once per page load via /api/settings/public) and re-renders
+ * when it arrives. Falls back to NPR immediately so numbers never flash
+ * in the wrong currency.
+ */
+export function useBaseCurrency(): string {
+  const [code, setCode] = useState("NPR");
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/settings/public")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (alive && d?.currency) setCode(d.currency);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return code;
+}
+
+/** Format with the company base currency (pass a code to override). */
+export function useMoney(decimals = 2) {
+  const base = useBaseCurrency();
+  return useCallback((n: number, code?: string) => formatMoney(n, code ?? base, decimals), [base, decimals]);
+}
 
 export function StatCard({
   label,
@@ -84,11 +114,37 @@ export function Modal({
   );
 }
 
-export const money = (n: number) =>
-  n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+/** Currency dropdown options — shared by every money screen. */
+export function CurrencySelect({
+  value,
+  onChange,
+  className = "input",
+}: {
+  value: string;
+  onChange: (code: string) => void;
+  className?: string;
+}) {
+  return (
+    <select className={className} value={value} onChange={(e) => onChange(e.target.value)}>
+      {CURRENCIES.map((c) => (
+        <option key={c.code} value={c.code}>
+          {c.code} — {c.name} ({c.symbol.trim()})
+        </option>
+      ))}
+    </select>
+  );
+}
 
-export const money2 = (n: number) =>
-  n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+export const money = (n: number, code = "NPR") => formatMoney(n, code, 0);
+
+/**
+ * Formats an amount for a specific invoice/order currency. Use this when the
+ * record carries its own currency (invoices, POs, SOs, BOQs) — plain `money`
+ * formats in the company base currency.
+ */
+export const moneyIn = (n: number, code: string) => formatMoney(n, code, 2);
+
+export const moneySym = (n: number, code: string) => `${currencySymbol(code)}${n.toLocaleString("en-IN")}`;
 
 export const fmtDate = (d: string | Date) =>
   new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });

@@ -3,13 +3,13 @@ import { getSession } from "next-auth/react";
 import { useCallback, useEffect, useState } from "react";
 import Shell from "@/components/Shell";
 import DualDatePicker from "@/components/DualDatePicker";
-import { Modal, Badge, StatCard, EmptyState, money2, fmtDate } from "@/components/ui";
+import { Modal, Badge, StatCard, EmptyState, fmtDate, moneyIn, CurrencySelect, useBaseCurrency } from "@/components/ui";
 import { homeFor, isManagement } from "@/lib/rbac";
 
 type Item = { id: string; desc: string; qty: number; unit: string; unitPrice: number };
 type Invoice = {
   id: string; number: string; clientName: string; clientEmail: string | null;
-  status: string; issueDate: string; dueDate: string; taxPercent: number; notes: string | null;
+  status: string; issueDate: string; dueDate: string; taxPercent: number; currency: string; notes: string | null;
   site: { id: string; name: string; code: string } | null;
   items: Item[]; payments: { id: string; amount: number; method: string; paidAt: string; reference: string | null }[];
   subtotal: number; tax: number; total: number; paid: number; balance: number;
@@ -24,9 +24,10 @@ const STATUS_COLOR: Record<string, string> = {
   CANCELLED: "bg-red-100 text-red-700",
 };
 
-const emptyForm = { clientName: "", clientEmail: "", clientPhone: "", siteId: "", dueDate: "", taxPercent: "18", notes: "", status: "DRAFT", items: [{ desc: "", qty: "1", unit: "unit", unitPrice: "0" }] };
+const emptyForm = { clientName: "", clientEmail: "", clientPhone: "", siteId: "", dueDate: "", taxPercent: "13", currency: "NPR", notes: "", status: "DRAFT", items: [{ desc: "", qty: "1", unit: "unit", unitPrice: "0" }] };
 
 export default function InvoicesPage() {
+  const base = useBaseCurrency();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [sites, setSites] = useState<{ id: string; name: string }[]>([]);
   const [filter, setFilter] = useState("ALL");
@@ -46,6 +47,11 @@ export default function InvoicesPage() {
     load();
     fetch("/api/sites").then((r) => r.ok ? r.json() : null).then((d) => d && setSites(d.sites.map((s: { id: string; name: string }) => ({ id: s.id, name: s.name }))));
   }, [load]);
+
+  // Default the new-invoice currency to the company base currency once known.
+  useEffect(() => {
+    setForm((f) => (f.currency === "NPR" && f.clientName === "" ? { ...f, currency: base } : f));
+  }, [base]);
 
   function setItem(idx: number, patch: Partial<typeof form.items[number]>) {
     setForm((f) => ({ ...f, items: f.items.map((it, i) => (i === idx ? { ...it, ...patch } : it)) }));
@@ -78,7 +84,7 @@ export default function InvoicesPage() {
       return;
     }
     setModal(false);
-    setForm(emptyForm);
+    setForm({ ...emptyForm, currency: base });
     load();
   }
 
@@ -138,10 +144,10 @@ export default function InvoicesPage() {
   return (
     <Shell title="Invoices & Payments" subtitle="Milestone billing, payment tracking and printable invoices">
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        <StatCard label="Total Billed" value={money2(totals.billed)} accent="blue" />
-        <StatCard label="Received" value={money2(totals.received)} accent="emerald" />
-        <StatCard label="Outstanding" value={money2(totals.outstanding)} accent="brand" />
-        <StatCard label="Overdue" value={money2(totals.overdue)} accent={totals.overdue > 0 ? "red" : "slate"} />
+        <StatCard label={`Total Billed (${base})`} value={moneyIn(totals.billed, base)} accent="blue" />
+        <StatCard label={`Received (${base})`} value={moneyIn(totals.received, base)} accent="emerald" />
+        <StatCard label={`Outstanding (${base})`} value={moneyIn(totals.outstanding, base)} accent="brand" />
+        <StatCard label={`Overdue (${base})`} value={moneyIn(totals.overdue, base)} accent={totals.overdue > 0 ? "red" : "slate"} />
       </div>
 
       <div className="mb-4 mt-6 flex flex-wrap items-center justify-between gap-2">
@@ -156,9 +162,9 @@ export default function InvoicesPage() {
             </button>
           ))}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <a className="btn-outline" href="/api/reports/export?type=invoices" target="_blank">⬇ Export CSV</a>
-          <button className="btn-primary" onClick={() => { setForm(emptyForm); setError(""); setModal(true); }}>+ New Invoice</button>
+          <button className="btn-primary" onClick={() => { setForm({ ...emptyForm, currency: base }); setError(""); setModal(true); }}>+ New Invoice</button>
         </div>
       </div>
 
@@ -172,6 +178,7 @@ export default function InvoicesPage() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm font-extrabold text-slate-900">{inv.number}</p>
+                    <Badge className="bg-slate-100 font-bold text-slate-700">{inv.currency}</Badge>
                     <Badge className={STATUS_COLOR[inv.status]}>{inv.status.replace("_", " ")}</Badge>
                     {inv.balance > 0.001 && new Date(inv.dueDate) < new Date() && <Badge className="bg-red-600 text-white">OVERDUE</Badge>}
                   </div>
@@ -180,7 +187,7 @@ export default function InvoicesPage() {
                     {inv.site ? `🏗️ ${inv.site.name} · ` : ""}issued {fmtDate(inv.issueDate)} · due {fmtDate(inv.dueDate)} · {inv.items.length} line item{inv.items.length === 1 ? "" : "s"}
                   </p>
                   <p className="mt-1 text-xs text-slate-400">
-                    Paid {money2(inv.paid)} of {money2(inv.total)} · balance <strong className={inv.balance > 0 ? "text-red-600" : "text-emerald-600"}>{money2(inv.balance)}</strong>
+                    Paid {moneyIn(inv.paid, inv.currency)} of {moneyIn(inv.total, inv.currency)} · balance <strong className={inv.balance > 0 ? "text-red-600" : "text-emerald-600"}>{moneyIn(inv.balance, inv.currency)}</strong>
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -217,6 +224,11 @@ export default function InvoicesPage() {
             <div><label className="label">Client phone</label><input className="input" value={form.clientPhone} onChange={(e) => setForm({ ...form, clientPhone: e.target.value })} /></div>
             <div><DualDatePicker label="Due date" value={form.dueDate} onChange={(v) => setForm({ ...form, dueDate: v })} /></div>
             <div><label className="label">Tax %</label><input className="input" type="number" min={0} max={100} step="0.5" value={form.taxPercent} onChange={(e) => setForm({ ...form, taxPercent: e.target.value })} /></div>
+            <div className="sm:col-span-2">
+              <label className="label">Currency</label>
+              <CurrencySelect value={form.currency} onChange={(currency) => setForm({ ...form, currency })} />
+              <p className="mt-1 text-xs text-slate-400">All amounts on this invoice are in {form.currency}.</p>
+            </div>
           </div>
 
           <div>
@@ -245,7 +257,7 @@ export default function InvoicesPage() {
               Create as sent (ready for payment)
             </label>
             <p className="text-sm text-slate-500">
-              Subtotal: <strong>{money2(form.items.reduce((s, i) => s + (parseFloat(i.qty) || 0) * (parseFloat(i.unitPrice) || 0), 0))}</strong>
+              Subtotal: <strong>{moneyIn(form.items.reduce((s, i) => s + (parseFloat(i.qty) || 0) * (parseFloat(i.unitPrice) || 0), 0), form.currency)}</strong>
             </p>
           </div>
 
@@ -261,9 +273,9 @@ export default function InvoicesPage() {
       <Modal open={!!payFor} onClose={() => setPayFor(null)} title={`Record Payment — ${payFor?.number ?? ""}`}>
         <form onSubmit={recordPayment} className="space-y-3">
           <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
-            Balance due: <strong>{payFor ? money2(payFor.balance) : ""}</strong>
+            Balance due: <strong>{payFor ? moneyIn(payFor.balance, payFor.currency) : ""}</strong> {payFor ? `(${payFor.currency})` : ""}
           </p>
-          <div><label className="label">Amount (USD)</label><input className="input" required type="number" min={0.01} step="any" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} /></div>
+          <div><label className="label">Amount {payFor ? `(${payFor.currency})` : ""}</label><input className="input" required type="number" min={0.01} step="any" value={payForm.amount} onChange={(e) => setPayForm({ ...payForm, amount: e.target.value })} /></div>
           <div>
             <label className="label">Method</label>
             <select className="input" value={payForm.method} onChange={(e) => setPayForm({ ...payForm, method: e.target.value })}>

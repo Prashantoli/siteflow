@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { getCompany } from "@/lib/settings";
+import { formatMoney } from "@/lib/currency";
+import { formatDual } from "@/lib/nepal";
 
 export function computeTotals(
   items: { qty: number; unitPrice: number }[],
@@ -35,8 +37,6 @@ export async function recalcInvoiceStatus(invoiceId: string) {
   }
 }
 
-const money = (n: number) =>
-  n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 const fmtDate = (d: Date | string) => new Date(d).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 
 /** Self-contained printable HTML for the invoice PDF/browser print. */
@@ -50,6 +50,9 @@ export async function buildInvoiceHtml(invoiceId: string): Promise<string | null
   const { subtotal, tax, total } = computeTotals(inv.items, inv.taxPercent);
   const paid = inv.payments.reduce((s, p) => s + p.amount, 0);
   const balance = total - paid;
+
+  const cur = inv.currency || "NPR";
+  const money = (n: number) => formatMoney(n, cur, 2);
 
   const rows = inv.items
     .map(
@@ -88,7 +91,8 @@ export async function buildInvoiceHtml(invoiceId: string): Promise<string | null
     <div style="text-align:right">
       <div style="font-size:26px;font-weight:800">INVOICE</div>
       <div class="muted">${inv.number}</div>
-      <div class="muted">Issued ${fmtDate(inv.issueDate)} · Due ${fmtDate(inv.dueDate)}</div>
+      <div class="muted">Issued ${formatDual(inv.issueDate)} · Due ${formatDual(inv.dueDate)}</div>
+      <div class="muted">Currency: ${cur}</div>
       <div class="badge" style="margin-top:6px">${inv.status.replace("_", " ")}</div>
     </div>
   </div>
