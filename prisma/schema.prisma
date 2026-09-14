@@ -1,0 +1,504 @@
+// SiteFlow — Construction Site Management System
+// Prisma schema: users, sites, crews, tasks, attendance, notifications, invoices, payments, settings
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// -----------------------------
+// Enums
+// -----------------------------
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum TaskStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CARD
+  UPI
+  CHEQUE
+  OTHER
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  SCHEDULE
+  LOCATION
+  REMINDER
+  SYSTEM
+}
+
+enum WorkdayStatus {
+  PRESENT
+  LATE
+  HALF_DAY
+  ABSENT
+}
+
+// -----------------------------
+// Core models
+// -----------------------------
+model User {
+  id           String         @id @default(cuid())
+  name         String
+  email        String         @unique
+  phone        String?
+  passwordHash String
+  role         Role           @default(EMPLOYEE)
+  jobTitle     String?
+  hourlyRate   Float          @default(0)
+  status       EmployeeStatus @default(ACTIVE)
+  lastLat      Float?
+  lastLng      Float?
+  lastSeenAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  crewMemberships CrewMember[]
+  leadCrews       Crew[]           @relation("CrewLeader")
+  assignments     TaskAssignment[]
+  activities      ActivityLog[]
+  notifications   Notification[]
+  attendance      Attendance[]
+  siteMemberships SiteMember[]
+  managedSites    Site[]           @relation("SiteManager")
+  createdTasks    Task[]           @relation("TaskCreator")
+  createdInvoices Invoice[]        @relation("InvoiceCreator")
+  deployments     Deployment[]
+  boqs            Boq[]            @relation("BoqCreator")
+  purchaseOrders  PurchaseOrder[]  @relation("PoCreator")
+  salesOrders     SalesOrder[]     @relation("SoCreator")
+
+  @@map("users")
+}
+
+model Site {
+  id          String    @id @default(cuid())
+  name        String
+  code        String    @unique
+  address     String
+  city        String
+  lat         Float
+  lng         Float
+  radiusM     Int       @default(150)
+  status      String    @default("ACTIVE") // ACTIVE | ON_HOLD | COMPLETED
+  budget      Float     @default(0)
+  startDate   DateTime?
+  endDate     DateTime?
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  managerId      String?
+  manager        User?           @relation("SiteManager", fields: [managerId], references: [id], onDelete: SetNull)
+  members        SiteMember[]
+  tasks          Task[]
+  attendance     Attendance[]
+  invoices       Invoice[]
+  deployments    Deployment[]
+  boqs           Boq[]
+  purchaseOrders PurchaseOrder[]
+  salesOrders    SalesOrder[]
+
+  @@map("sites")
+}
+
+model SiteMember {
+  id         String   @id @default(cuid())
+  siteId     String
+  userId     String
+  role       String   @default("WORKER") // WORKER | MANAGER
+  assignedAt DateTime @default(now())
+
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, userId])
+  @@map("site_members")
+}
+
+model Crew {
+  id        String   @id @default(cuid())
+  name      String
+  skill     String? // e.g. Masonry, Electrical, Plumbing
+  leaderId  String?
+  leader    User?    @relation("CrewLeader", fields: [leaderId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+
+  members CrewMember[]
+  tasks   Task[]
+
+  @@map("crews")
+}
+
+model CrewMember {
+  id      String   @id @default(cuid())
+  crewId  String
+  userId  String
+  addedAt DateTime @default(now())
+
+  crew Crew @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([crewId, userId])
+  @@map("crew_members")
+}
+
+model Task {
+  id             String       @id @default(cuid())
+  title          String
+  description    String?
+  siteId         String
+  status         TaskStatus   @default(NOT_STARTED)
+  priority       TaskPriority @default(MEDIUM)
+  startDate      DateTime
+  dueDate        DateTime
+  completedAt    DateTime?
+  estimatedHours Float        @default(0)
+  progress       Int          @default(0) // 0–100
+  createdById    String
+  crewId         String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  site        Site             @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  createdBy   User             @relation("TaskCreator", fields: [createdById], references: [id])
+  crew        Crew?            @relation(fields: [crewId], references: [id], onDelete: SetNull)
+  assignments TaskAssignment[]
+  deployments Deployment[]
+
+  @@index([siteId])
+  @@index([status])
+  @@map("tasks")
+}
+
+model TaskAssignment {
+  id         String     @id @default(cuid())
+  taskId     String
+  userId     String
+  status     TaskStatus @default(NOT_STARTED)
+  progress   Int        @default(0)
+  assignedAt DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, userId])
+  @@index([userId])
+  @@map("task_assignments")
+}
+
+model Deployment {
+  id        String    @id @default(cuid())
+  userId    String
+  siteId    String
+  taskId    String?
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  note      String?
+
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site Site  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  task Task? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  @@index([userId, endedAt])
+  @@map("deployments")
+}
+
+model Attendance {
+  id             String        @id @default(cuid())
+  userId         String
+  siteId         String
+  checkInAt      DateTime
+  checkOutAt     DateTime?
+  checkInLat     Float?
+  checkInLng     Float?
+  checkOutLat    Float?
+  checkOutLng    Float?
+  withinGeofence Boolean       @default(false)
+  workedMinutes  Int           @default(0)
+  status         WorkdayStatus @default(PRESENT)
+  note           String?
+  createdAt      DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  site Site @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([userId, checkInAt])
+  @@index([siteId, checkInAt])
+  @@map("attendance")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  title     String
+  body      String
+  type      NotificationType @default(SYSTEM)
+  link      String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  number      String        @unique
+  clientName  String
+  clientEmail String?
+  clientPhone String?
+  siteId      String?
+  status      InvoiceStatus @default(DRAFT)
+  issueDate   DateTime      @default(now())
+  dueDate     DateTime
+  taxPercent  Float         @default(0)
+  currency    String        @default("NPR")
+  notes       String?
+  createdById String
+
+  site      Site?         @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  createdBy User          @relation("InvoiceCreator", fields: [createdById], references: [id])
+  items     InvoiceItem[]
+  payments  Payment[]
+
+  @@map("invoices")
+}
+
+model InvoiceItem {
+  id        String @id @default(cuid())
+  invoiceId String
+  desc      String
+  qty       Float
+  unit      String @default("unit")
+  unitPrice Float
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("invoice_items")
+}
+
+model Payment {
+  id         String        @id @default(cuid())
+  invoiceId  String
+  amount     Float
+  method     PaymentMethod @default(BANK_TRANSFER)
+  reference  String?
+  paidAt     DateTime      @default(now())
+  receivedBy String?
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String?
+  entityId  String?
+  detail    String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@map("activity_logs")
+}
+
+model AppSetting {
+  key   String @id
+  value String
+
+  @@map("app_settings")
+}
+
+// -----------------------------
+// BOQ — Bill of Quantities
+// -----------------------------
+model Boq {
+  id          String   @id @default(cuid())
+  ref         String   @unique
+  title       String
+  siteId      String?
+  status      String   @default("DRAFT") // DRAFT | APPROVED | SUPERSEDED
+  currency    String   @default("NPR")
+  notes       String?
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  site      Site?     @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  createdBy User      @relation("BoqCreator", fields: [createdById], references: [id])
+  items     BoqItem[]
+
+  @@map("boqs")
+}
+
+model BoqItem {
+  id          String  @id @default(cuid())
+  boqId       String
+  description String
+  unit        String  @default("unit") // per Nepal PWD norms: cu.m, sq.m, kg, no.
+  qty         Float
+  rate        Float
+  remark      String?
+
+  boq Boq @relation(fields: [boqId], references: [id], onDelete: Cascade)
+
+  @@map("boq_items")
+}
+
+// -----------------------------
+// Inventory
+// -----------------------------
+model InventoryItem {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  name      String
+  category  String? // Cement, Steel, Aggregate, Electrical, Plumbing…
+  unit      String   @default("nos")
+  stockQty  Float    @default(0)
+  minStock  Float    @default(0) // reorder alert threshold
+  avgCost   Float    @default(0) // moving average cost (NPR)
+  lastPrice Float    @default(0) // last purchase price — prices fluctuate
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  poItems PurchaseOrderItem[]
+  soItems SalesOrderItem[]
+
+  @@map("inventory_items")
+}
+
+// -----------------------------
+// Purchase Orders (buy from vendors)
+// -----------------------------
+model PurchaseOrder {
+  id             String    @id @default(cuid())
+  number         String    @unique
+  vendorName     String
+  vendorAddress  String?
+  vendorPhone    String?
+  vendorVat      String? // vendor PAN/VAT number
+  siteId         String?
+  status         String    @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | PARTIALLY_RECEIVED | RECEIVED | CANCELLED
+  orderDate      DateTime  @default(now())
+  expectedDate   DateTime?
+  taxPercent     Float     @default(13) // Nepal VAT 13%
+  discountAmount Float     @default(0)
+  currency       String    @default("NPR")
+  notes          String?
+  createdById    String
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  site      Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  createdBy User                @relation("PoCreator", fields: [createdById], references: [id])
+  items     PurchaseOrderItem[]
+
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id          String  @id @default(cuid())
+  orderId     String
+  inventoryId String?
+  description String
+  unit        String  @default("nos")
+  qty         Float
+  unitPrice   Float // editable — market prices fluctuate
+  receivedQty Float   @default(0)
+  remark      String?
+
+  order     PurchaseOrder  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventory InventoryItem? @relation(fields: [inventoryId], references: [id], onDelete: SetNull)
+
+  @@map("purchase_order_items")
+}
+
+// -----------------------------
+// Sales Orders (sell to clients)
+// -----------------------------
+model SalesOrder {
+  id              String    @id @default(cuid())
+  number          String    @unique
+  customerName    String
+  customerAddress String?
+  customerPhone   String?
+  customerVat     String?
+  siteId          String?
+  status          String    @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | PARTIALLY_DELIVERED | DELIVERED | CANCELLED
+  orderDate       DateTime  @default(now())
+  deliveryDate    DateTime?
+  taxPercent      Float     @default(13)
+  discountAmount  Float     @default(0)
+  currency        String    @default("NPR")
+  notes           String?
+  createdById     String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  site      Site?            @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  createdBy User             @relation("SoCreator", fields: [createdById], references: [id])
+  items     SalesOrderItem[]
+
+  @@map("sales_orders")
+}
+
+model SalesOrderItem {
+  id           String  @id @default(cuid())
+  orderId      String
+  inventoryId  String?
+  description  String
+  unit         String  @default("nos")
+  qty          Float
+  unitPrice    Float // editable selling price
+  deliveredQty Float   @default(0)
+  remark       String?
+
+  order     SalesOrder     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  inventory InventoryItem? @relation(fields: [inventoryId], references: [id], onDelete: SetNull)
+
+  @@map("sales_order_items")
+}
