@@ -5,35 +5,42 @@ import { toCsv, sendCsv } from "@/lib/export";
 import { apiManagement } from "@/lib/api";
 import { computeTotals } from "@/lib/invoicing";
 
-/** GET /api/reports/export?type=employees|attendance|sites|invoices|purchase|sales|inventory|boq */
+/** GET /api/reports/export?type=…&from=YYYY-MM-DD&to=YYYY-MM-DD */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     const me = await apiManagement(req, res);
     if (!me) return bad(res, "Forbidden", 403);
     const type = (req.query.type as string) || "employees";
     const stamp = new Date().toISOString().slice(0, 10);
+    const fromRaw = typeof req.query.from === "string" && req.query.from ? req.query.from : null;
+    const toRaw = typeof req.query.to === "string" && req.query.to ? req.query.to : null;
+    const from = fromRaw ? new Date(`${fromRaw}T00:00:00`) : null;
+    const to = toRaw ? new Date(`${toRaw}T23:59:59.999`) : null;
+    const range = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
+    const hasRange = !!(from || to);
+    const suffix = hasRange ? `-${fromRaw ?? "start"}_${toRaw ?? "now"}` : "";
 
     if (type === "purchase") {
       const { orderTotals } = await import("@/lib/orders");
       const { formatBs } = await import("@/lib/nepal");
-      const orders = await prisma.purchaseOrder.findMany({ include: { items: true, site: true }, orderBy: { orderDate: "desc" } });
+      const orders = await prisma.purchaseOrder.findMany({ where: hasRange ? { orderDate: range } : undefined, include: { items: true, site: true }, orderBy: { orderDate: "desc" } });
       const rows = orders.map((o) => {
         const t = orderTotals(o.items, o.taxPercent, o.discountAmount);
         return [o.number, o.vendorName, o.site?.name ?? "", o.status, o.currency, o.orderDate.toISOString().slice(0, 10), formatBs(o.orderDate), t.subtotal, t.discount, t.tax, t.total, o.items.length];
       });
-      sendCsv(res, toCsv(["PO No", "Vendor", "Site", "Status", "Currency", "Date (AD)", "Date (BS)", "Subtotal", "Discount", "VAT", "Total", "Lines"], rows), `purchase-report-${stamp}.csv`);
+      sendCsv(res, toCsv(["PO No", "Vendor", "Site", "Status", "Currency", "Date (AD)", "Date (BS)", "Subtotal", "Discount", "VAT", "Total", "Lines"], rows), `purchase-report-${stamp}${suffix}.csv`);
       return;
     }
 
     if (type === "sales") {
       const { orderTotals } = await import("@/lib/orders");
       const { formatBs } = await import("@/lib/nepal");
-      const orders = await prisma.salesOrder.findMany({ include: { items: true, site: true }, orderBy: { orderDate: "desc" } });
+      const orders = await prisma.salesOrder.findMany({ where: hasRange ? { orderDate: range } : undefined, include: { items: true, site: true }, orderBy: { orderDate: "desc" } });
       const rows = orders.map((o) => {
         const t = orderTotals(o.items, o.taxPercent, o.discountAmount);
         return [o.number, o.customerName, o.site?.name ?? "", o.status, o.currency, o.orderDate.toISOString().slice(0, 10), formatBs(o.orderDate), t.subtotal, t.discount, t.tax, t.total, o.items.length];
       });
-      sendCsv(res, toCsv(["SO No", "Customer", "Site", "Status", "Currency", "Date (AD)", "Date (BS)", "Subtotal", "Discount", "VAT", "Total", "Lines"], rows), `sales-report-${stamp}.csv`);
+      sendCsv(res, toCsv(["SO No", "Customer", "Site", "Status", "Currency", "Date (AD)", "Date (BS)", "Subtotal", "Discount", "VAT", "Total", "Lines"], rows), `sales-report-${stamp}${suffix}.csv`);
       return;
     }
 
@@ -62,7 +69,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     if (type === "employees") {
       const users = await prisma.user.findMany({
         where: { role: "EMPLOYEE" },
-        include: { assignments: { include: { task: true } }, attendance: true },
+        include: { assignments: { include: { task: true } }, attendance: hasRange ? { where: { checkInAt: range } } : true },
       });
       const rows = users.map((u) => {
         const completed = u.assignments.filter((a) => a.status === "COMPLETED").length;
@@ -74,16 +81,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sendCsv(
         res,
         toCsv(["Name", "Job Title", "Status", "Tasks Completed", "Open Tasks", "Hours Worked", "Late Days", "Hourly Rate"], rows),
-        `employees-${stamp}.csv`
+        `employees-${stamp}${suffix}.csv`
       );
       return;
     }
 
     if (type === "attendance") {
       const records = await prisma.attendance.findMany({
+        where: hasRange ? { checkInAt: range } : undefined,
         include: { user: { select: { name: true } }, site: { select: { name: true, code: true } } },
         orderBy: { checkInAt: "desc" },
-        take: 2000,
+        take: 5000,
       });
       const rows = records.map((r) => [
         r.user.name,
@@ -97,7 +105,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sendCsv(
         res,
         toCsv(["Employee", "Site", "Check In", "Check Out", "Hours", "Status", "In Geofence"], rows),
-        `attendance-${stamp}.csv`
+        `attendance-${stamp}${suffix}.csv`
       );
       return;
     }
@@ -120,7 +128,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     if (type === "invoices") {
-      const invoices = await prisma.invoice.findMany({ include: { items: true, payments: true, site: true } });
+      const invoices = await prisma.invoice.findMany({ where: hasRange ? { issueDate: range } : undefined, include: { items: true, payments: true, site: true } });
       const rows = invoices.map((inv) => {
         const { total } = computeTotals(inv.items, inv.taxPercent);
         const paid = inv.payments.reduce((s, p) => s + p.amount, 0);
@@ -129,7 +137,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       sendCsv(
         res,
         toCsv(["Number", "Client", "Site", "Status", "Total", "Paid", "Balance", "Due Date"], rows),
-        `invoices-${stamp}.csv`
+        `invoices-${stamp}${suffix}.csv`
       );
       return;
     }

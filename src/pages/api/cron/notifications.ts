@@ -43,6 +43,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           },
         });
         if (recent) continue;
+        if (!task.site) continue; // self-assigned admin tasks have no site
         const tpl = templates.shiftReminder(task.site.name, task.startDate);
         await notifyUser({ userId: a.userId, ...tpl, email: true });
         sentReminders++;

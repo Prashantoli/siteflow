@@ -189,12 +189,30 @@ export default function BoqPage() {
     load();
   }
 
+  async function toInvoice(b: Boq) {
+    if (!confirm(`Create a draft invoice from ${b.ref}?`)) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/boq/${b.id}/to-invoice`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error((await res.json()).error);
+      if (data.converted === false) {
+        alert(data.message ?? "This BOQ was already converted to an invoice.");
+      } else {
+        alert(`Draft invoice ${data.invoice.number} created ✔ — open Invoices to review and send.`);
+      }
+    } catch (e) {
+      alert((e as Error).message || "Conversion failed");
+    }
+    setBusy(false);
+  }
+
   const curSym = (code: string) => CURRENCIES.find((c) => c.code === code)?.symbol ?? "";
 
   return (
     <Shell title="Bill of Quantities (BOQ)" subtitle="Estimate materials & work items per site — Nepal PWD-style units">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <a className="btn-outline" href="/api/reports/export?type=boq" target="_blank">⬇ Export CSV</a>
+        <a className="btn-outline" href="/api/reports/export?type=boq" target="_blank">⬇ Export all (CSV)</a>
         <button className="btn-primary" onClick={openCreate}>+ New BOQ</button>
       </div>
 
@@ -214,11 +232,14 @@ export default function BoqPage() {
                   <p className="mt-0.5 text-sm font-semibold text-slate-700">{b.title}</p>
                   <p className="text-xs text-slate-400">{b.site ? `🏗️ ${b.site.name} · ` : ""}by {b.createdBy.name} · {new Date(b.createdAt).toLocaleDateString()}</p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
                   <div className="text-right">
                     <p className="text-lg font-extrabold text-slate-900">{curSym(b.currency)}{b.totals.total.toLocaleString("en-IN")}</p>
                     <p className="text-[11px] text-slate-400">{b.items.length} items (pre-VAT estimate)</p>
                   </div>
+                  <button className="btn-primary !px-3 !py-1.5 text-xs" disabled={busy} onClick={() => toInvoice(b)}>🧾 BOQ to Invoice</button>
+                  <a className="btn-outline !px-3 !py-1.5 text-xs" href={`/api/boq/${b.id}/export?format=csv`}>⬇ CSV</a>
+                  <a className="btn-outline !px-3 !py-1.5 text-xs" href={`/api/boq/${b.id}/export?format=pdf`} target="_blank">🖨 PDF</a>
                   <button className="btn-outline !px-3 !py-1.5 text-xs" onClick={() => openEdit(b)}>Edit</button>
                   <button className="btn-outline !px-3 !py-1.5 text-xs text-red-600" onClick={() => remove(b)}>Delete</button>
                 </div>

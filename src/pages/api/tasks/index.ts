@@ -9,7 +9,7 @@ import { TaskStatus, TaskPriority } from "@prisma/client";
 const createSchema = z.object({
   title: z.string().min(3).max(140),
   description: z.string().max(2000).optional().nullable(),
-  siteId: z.string().min(1),
+  siteId: z.string().min(1).optional().nullable(), // optional — managers can self-assign without a site
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).default("MEDIUM"),
   startDate: z.string(),
   dueDate: z.string(),
@@ -22,7 +22,7 @@ const createSchema = z.object({
 
 const listQuery = z.object({
   siteId: z.string().optional(),
-  status: z.enum(["NOT_STARTED", "IN_PROGRESS", "COMPLETED"]).optional(),
+  status: z.enum(["NOT_STARTED", "IN_PROGRESS", "BLOCKED", "COMPLETED"]).optional(),
   mine: z.string().optional(),
 });
 
@@ -63,8 +63,18 @@ export default handler(async (req, res) => {
     if (!sameOrigin(req)) return bad(res, "Bad origin", 403);
     const data = await parseBody(req, createSchema);
 
-    const site = await prisma.site.findUnique({ where: { id: data.siteId } });
-    if (!site) return bad(res, "Site not found", 404);
+    let site: { id: string; name: string; address: string; city: string } | null = null;
+    if (data.siteId) {
+      site = await prisma.site.findUnique({
+        where: { id: data.siteId },
+        select: { id: true, name: true, address: true, city: true },
+      });
+      if (!site) return bad(res, "Site not found", 404);
+    }
+    if (!data.siteId && data.assigneeIds.length === 0) {
+      return bad(res, "A task needs a site or at least one assignee", 422);
+    }
+    const isSelfAssigned = data.assigneeIds.includes(me.id);
 
     const start = new Date(data.startDate);
     const due = new Date(data.dueDate);
@@ -74,7 +84,7 @@ export default handler(async (req, res) => {
       data: {
         title: data.title,
         description: data.description ?? null,
-        siteId: data.siteId,
+        siteId: data.siteId ?? null,
         priority: data.priority as TaskPriority,
         startDate: start,
         dueDate: due,
@@ -86,21 +96,27 @@ export default handler(async (req, res) => {
       include: { assignments: true, site: { select: { name: true } } },
     });
 
-    if (data.notify && data.assigneeIds.length > 0) {
-      const tpl = templates.taskAssigned(task.title, site.name, due);
-      await notifyMany(data.assigneeIds, {
-        ...tpl,
-        email: true,
-        sms: data.priority === "URGENT",
-      });
-      // location alert with exact site address
-      const loc = templates.locationAlert(site.name, `${site.address}, ${site.city}`);
-      await notifyMany(data.assigneeIds, { ...loc });
+    if (data.notify) {
+      const recipients = data.assigneeIds.filter((id) => id !== me.id); // don't notify yourself
+      if (recipients.length > 0) {
+        const siteName = site?.name ?? "(no site)";
+        const tpl = templates.taskAssigned(task.title, siteName, due);
+        await notifyMany(recipients, {
+          ...tpl,
+          email: true,
+          sms: data.priority === "URGENT",
+        });
+        // location alert with exact site address
+        if (site) {
+          const loc = templates.locationAlert(site.name, `${site.address}, ${site.city}`);
+          await notifyMany(recipients, { ...loc });
+        }
+      }
     }
 
-    if (data.deployNow) {
+    if (data.deployNow && site) {
       for (const userId of data.assigneeIds) {
-        await startDeployment(userId, data.siteId, task.id);
+        await startDeployment(userId, site.id, task.id);
       }
     }
 

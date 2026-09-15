@@ -1,19 +1,20 @@
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { ok, bad, handler, parseBody, apiUser, apiManagement, sameOrigin, parseId } from "@/lib/api";
-import { notifyUser, templates } from "@/lib/notify";
+import { notifyUser, notifyMany, templates } from "@/lib/notify";
 import { TaskStatus } from "@prisma/client";
 
 const updateSchema = z.object({
   title: z.string().min(3).max(140).optional(),
   description: z.string().max(2000).optional().nullable(),
-  status: z.enum(["NOT_STARTED", "IN_PROGRESS", "COMPLETED"]).optional(),
+  status: z.enum(["NOT_STARTED", "IN_PROGRESS", "BLOCKED", "COMPLETED"]).optional(),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "URGENT"]).optional(),
   startDate: z.string().optional(),
   dueDate: z.string().optional(),
   estimatedHours: z.number().min(0).max(1000).optional(),
   progress: z.number().int().min(0).max(100).optional(),
   crewId: z.string().optional().nullable(),
+  blockerNote: z.string().max(500).optional().nullable(),
   assigneeIds: z.array(z.string()).optional(),
   notify: z.boolean().optional(),
 });
@@ -58,7 +59,7 @@ export default handler(async (req, res) => {
 
     if (!isManager && !isAssignee) return bad(res, "Forbidden", 403);
 
-    // Employees may only update status/progress on their tasks
+    // Employees may only update status/progress/blocker on their tasks
     const managerFields = ["title", "description", "priority", "startDate", "dueDate", "estimatedHours", "crewId", "assigneeIds"] as const;
     if (!isManager && managerFields.some((f) => (data as Record<string, unknown>)[f] !== undefined)) {
       return bad(res, "Only managers can edit task details", 403);
@@ -74,6 +75,7 @@ export default handler(async (req, res) => {
     if (data.dueDate !== undefined) update.dueDate = new Date(data.dueDate);
     if (data.estimatedHours !== undefined) update.estimatedHours = data.estimatedHours;
     if (data.crewId !== undefined) update.crewId = data.crewId;
+    if (data.blockerNote !== undefined) update.blockerNote = data.blockerNote;
 
     // status / progress logic
     const newStatus = data.status as TaskStatus | undefined;
@@ -83,8 +85,10 @@ export default handler(async (req, res) => {
       if (newStatus === "COMPLETED") {
         update.progress = 100;
         update.completedAt = now;
+        update.blockerNote = null; // unblock on completion
       } else if (newStatus === "IN_PROGRESS") {
         update.completedAt = null;
+        update.blockerNote = null; // blocker resolved — back to work
         if ((newProgress ?? existing.progress) === 0) update.progress = 5;
       } else {
         update.completedAt = null;
@@ -116,6 +120,16 @@ export default handler(async (req, res) => {
       const st = (update.status as TaskStatus) ?? existing.status;
       await prisma.taskAssignment.updateMany({ where: { taskId: id }, data: { progress: newProgress, status: st } });
     }
+    // keep the worker's own assignment in sync when they update status/progress themselves
+    if (!isManager && (newStatus !== undefined || newProgress !== undefined)) {
+      await prisma.taskAssignment.updateMany({
+        where: { taskId: id, userId: me.id },
+        data: {
+          ...(newStatus !== undefined ? { status: newStatus } : {}),
+          ...(update.progress !== undefined ? { progress: update.progress as number } : {}),
+        },
+      });
+    }
 
     // membership changes (manager only)
     if (isManager && data.assigneeIds) {
@@ -130,7 +144,7 @@ export default handler(async (req, res) => {
       if (data.notify) {
         const added = data.assigneeIds.filter((uid) => !existing.assignments.some((a) => a.userId === uid));
         if (added.length > 0) {
-          const tpl = templates.taskAssigned(task.title, existing.site.name, task.dueDate);
+          const tpl = templates.taskAssigned(task.title, existing.site?.name ?? "(no site)", task.dueDate);
           await Promise.allSettled(
             added.map((userId) =>
               notifyUser({ userId, ...tpl, email: true, sms: task.priority === "URGENT" })
@@ -140,20 +154,29 @@ export default handler(async (req, res) => {
       }
     }
 
-    // notify manager(s) when an employee completes their task
-    if (newStatus === "COMPLETED" && !isManager) {
+    // notify manager(s) when an employee completes or blocks their task
+    if (newStatus && !isManager && (newStatus === "COMPLETED" || newStatus === "BLOCKED")) {
       const managers = await prisma.user.findMany({
         where: { role: { in: ["ADMIN", "MANAGER"] }, status: "ACTIVE" },
         select: { id: true },
       });
+      const siteName = existing.site?.name ?? "(no site)";
+      const tpl =
+        newStatus === "COMPLETED"
+          ? { title: "Task completed", body: `${me.name} completed "${task.title}" at ${siteName}` }
+          : {
+              title: "Task blocked",
+              body: `${me.name} flagged "${task.title}" at ${siteName} as BLOCKED${update.blockerNote ? `: ${update.blockerNote}` : ""}`,
+            };
       await Promise.allSettled(
         managers.map((m) =>
           notifyUser({
             userId: m.id,
-            title: "Task completed",
-            body: `${me.name} completed "${task.title}" at ${existing.site.name}`,
+            ...tpl,
             type: "SYSTEM",
             link: "/portal/tasks",
+            email: true,
+            sms: newStatus === "BLOCKED",
           })
         )
       );

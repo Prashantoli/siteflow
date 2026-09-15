@@ -12,32 +12,80 @@ type EmpRow = {
 type SiteRow = { id: string; name: string; code: string; status: string; workers: number; tasks: number; done: number; progress: number; budget: number };
 type Fin = { billed: number; received: number; outstanding: number; payroll: number };
 
+function qsRange(from: string, to: string): string {
+  const p = new URLSearchParams();
+  if (from) p.set("from", from);
+  if (to) p.set("to", to);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
 export default function ReportsPage() {
   const [emps, setEmps] = useState<EmpRow[]>([]);
   const [siteRows, setSiteRows] = useState<SiteRow[]>([]);
   const [fin, setFin] = useState<Fin | null>(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    Promise.all([
-      fetch("/api/reports/employees").then((r) => r.ok ? r.json() : null),
-      fetch("/api/reports/sites").then((r) => r.ok ? r.json() : null),
-      fetch("/api/reports/financial").then((r) => r.ok ? r.json() : null),
-    ]).then(([e, s, f]) => {
+  const qs = qsRange(from, to);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const [e, s, f] = await Promise.all([
+        fetch(`/api/reports/employees${qs}`).then((r) => r.ok ? r.json() : null),
+        fetch(`/api/reports/sites${qs}`).then((r) => r.ok ? r.json() : null),
+        fetch(`/api/reports/financial${qs}`).then((r) => r.ok ? r.json() : null),
+      ]);
       if (e) setEmps(e.employees);
       if (s) setSiteRows(s.sites);
       if (f) setFin(f);
-    });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const maxTasks = Math.max(1, ...emps.map((e) => e.completed + e.open));
 
   return (
-    <Shell title="Reports & Analytics" subtitle="Employee performance, site productivity and finances — exportable">
+    <Shell title="Reports & Analytics" subtitle="Employee performance, site productivity and finances — filterable by date and exportable">
+      {/* Date range filter */}
+      <div className="card mb-4 p-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="label">From</label>
+            <input type="date" className="input" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">To</label>
+            <input type="date" className="input" value={to} onChange={(e) => setTo(e.target.value)} />
+          </div>
+          <button className="btn-primary" disabled={loading} onClick={load}>{loading ? "Loading…" : "Apply filter"}</button>
+          {qs && (
+            <button
+              className="btn-outline"
+              onClick={() => { setFrom(""); setTo(""); setTimeout(load, 0); }}
+            >
+              Clear
+            </button>
+          )}
+          {qs && <span className="text-xs text-slate-500">📅 {from || "any"} → {to || "any"}</span>}
+        </div>
+      </div>
+
       <div className="mb-4 flex flex-wrap gap-2">
-        <a className="btn-outline" href="/api/reports/export?type=employees" target="_blank">⬇ Employees CSV</a>
-        <a className="btn-outline" href="/api/reports/export?type=attendance" target="_blank">⬇ Attendance CSV</a>
-        <a className="btn-outline" href="/api/reports/export?type=sites" target="_blank">⬇ Sites CSV</a>
-        <a className="btn-outline" href="/api/reports/export?type=invoices" target="_blank">⬇ Invoices CSV</a>
+        <a className="btn-outline" href={`/api/reports/export?type=employees${qs}`}>⬇ Employees CSV</a>
+        <a className="btn-outline" href={`/api/reports/export?type=attendance${qs}`}>⬇ Attendance CSV</a>
+        <a className="btn-outline" href={`/api/reports/export?type=sites${qs}`}>⬇ Sites CSV</a>
+        <a className="btn-outline" href={`/api/reports/export?type=invoices${qs}`}>⬇ Invoices CSV</a>
+        <a className="btn-outline" href={`/api/reports/export?type=boq${qs}`}>⬇ BOQ CSV</a>
+        <a className="btn-outline" href={`/api/reports/export?type=inventory${qs}`}>⬇ Inventory CSV</a>
       </div>
 
       {fin && (

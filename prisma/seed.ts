@@ -347,7 +347,7 @@ async function main() {
         },
       },
     });
-    createdTasks.push({ id: task.id, title: task.title, siteId: task.siteId, status: task.status });
+    createdTasks.push({ id: task.id, title: task.title, siteId: task.siteId ?? "", status: task.status });
   }
 
   // ----- Attendance: last 14 days, random-ish -----

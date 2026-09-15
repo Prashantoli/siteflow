@@ -8,8 +8,8 @@ import { mapsLink } from "@/lib/geo";
 
 type WorkerCard = {
   id: string; name: string; jobTitle: string | null; status: string; hourlyRate: number;
-  lastSeenAt: string | null;
-  current: { siteId: string | null; siteName: string | null; taskId: string | null; taskTitle: string | null; taskStatus: string | null; since: string | null };
+  lastSeenAt: string | null; lat: number | null; lng: number | null;
+  current: { siteId: string | null; siteName: string | null; siteLat: number | null; siteLng: number | null; taskId: string | null; taskTitle: string | null; taskStatus: string | null; since: string | null };
   openTasks: number;
 };
 

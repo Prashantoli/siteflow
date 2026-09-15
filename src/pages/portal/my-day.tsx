@@ -14,6 +14,8 @@ export default function MyDay({
   todays,
   deployments,
   sites,
+  canSelfAssign,
+  meId,
 }: {
   worker: { name: string; jobTitle: string | null };
   tasks: MyTask[];
@@ -21,6 +23,8 @@ export default function MyDay({
   todays: { id: string; site: string; checkInAt: string; checkOutAt: string | null; workedMinutes: number; status: string }[];
   deployments: { id: string; site: string; task: string | null; startedAt: string; endedAt: string | null }[];
   sites: { id: string; name: string; code: string; lat: number; lng: number; radiusM: number; address: string; city: string }[];
+  canSelfAssign: boolean;
+  meId: string;
 }) {
   return (
     <Shell title="My Day" subtitle={`${worker.name}${worker.jobTitle ? " · " + worker.jobTitle : ""}`}>
@@ -29,6 +33,8 @@ export default function MyDay({
         openShift={openShift}
         todays={todays}
         sites={sites}
+        canSelfAssign={canSelfAssign}
+        meId={meId}
       />
 
       {/* Schedule preview */}
@@ -86,6 +92,7 @@ export async function getServerSideProps(ctx: GetServerSidePropsContext) {
   if (!me) return { redirect: { destination: "/login", permanent: false } };
   // Managers/admins can preview the worker portal too
   void homeFor;
+  const canSelfAssign = me.role === "ADMIN" || me.role === "MANAGER";
 
   const assignments = await prisma.taskAssignment.findMany({
     where: { userId: meId },
@@ -107,13 +114,14 @@ export async function getServerSideProps(ctx: GetServerSidePropsContext) {
     status: a.status,
     progress: a.progress,
     priority: a.task.priority,
-    siteId: a.task.site.id,
-    siteName: a.task.site.name,
-    siteCode: a.task.site.code,
+    siteId: a.task.site?.id ?? "",
+    siteName: a.task.site?.name ?? "No site",
+    siteCode: a.task.site?.code ?? "",
     crewName: a.task.crew?.name ?? null,
     startDate: a.task.startDate.toISOString(),
     dueDate: a.task.dueDate.toISOString(),
     estimatedHours: a.task.estimatedHours,
+    blockerNote: a.task.blockerNote,
   }));
 
   const open = await prisma.attendance.findFirst({
@@ -146,6 +154,8 @@ export async function getServerSideProps(ctx: GetServerSidePropsContext) {
   return {
     props: {
       worker: { name: me.name, jobTitle: me.jobTitle },
+      canSelfAssign,
+      meId,
       tasks,
       openShift: open ? { siteName: open.site.name, checkInAt: open.checkInAt.toISOString() } : null,
       todays: todays.map((t) => ({

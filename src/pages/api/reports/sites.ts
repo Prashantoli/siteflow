@@ -3,14 +3,18 @@ import { prisma } from "@/lib/prisma";
 import { ok, bad } from "@/lib/api";
 import { apiManagement } from "@/lib/api";
 
-/** GET /api/reports/sites — progress/productivity per site. */
+/** GET /api/reports/sites?from=YYYY-MM-DD&to=YYYY-MM-DD — progress/productivity per site. */
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     const me = await apiManagement(req, res);
     if (!me) return bad(res, "Forbidden", 403);
 
+    const from = typeof req.query.from === "string" && req.query.from ? new Date(`${req.query.from}T00:00:00`) : null;
+    const to = typeof req.query.to === "string" && req.query.to ? new Date(`${req.query.to}T23:59:59.999`) : null;
+    const taskWhere = from || to ? { dueDate: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : undefined;
+
     const sites = await prisma.site.findMany({
-      include: { tasks: { select: { status: true, progress: true } }, members: { select: { id: true } } },
+      include: { tasks: { where: taskWhere, select: { status: true, progress: true } }, members: { select: { id: true } } },
       orderBy: { name: "asc" },
     });
 

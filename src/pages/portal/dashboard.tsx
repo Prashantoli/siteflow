@@ -1,5 +1,6 @@
 import { GetServerSidePropsContext } from "next";
 import { getSession } from "next-auth/react";
+import dynamic from "next/dynamic";
 import { prisma } from "@/lib/prisma";
 import { homeFor } from "@/lib/rbac";
 import Shell from "@/components/Shell";
@@ -7,7 +8,14 @@ import { StatCard, Progress, Badge, fmtDate } from "@/components/ui";
 import { ChartCard, TasksByStatusChart, WorkloadChart, AttendanceTrendChart } from "@/components/charts";
 import { getWorkforceBoard, TASK_STATUS_LABEL } from "@/lib/workforce";
 import { computeTotals } from "@/lib/invoicing";
+import type { MapWorker, MapSite } from "@/components/WorkforceMap";
 import { TaskStatus, Prisma } from "@prisma/client";
+
+// Leaflet touches `window` — client-side only (no SSR)
+const WorkforceMap = dynamic(() => import("@/components/WorkforceMap"), {
+  ssr: false,
+  loading: () => <div className="card p-10 text-center text-sm text-slate-400">Loading map…</div>,
+});
 
 export default function Dashboard({
   stats,
@@ -18,6 +26,8 @@ export default function Dashboard({
   upcoming,
   activity,
   receivables,
+  mapWorkers,
+  mapSites,
 }: {
   stats: { workers: number; busy: number; free: number; activeSites: number; openTasks: number; overdueTasks: number; completedThisMonth: number };
   statusData: { name: string; value: number }[];
@@ -27,10 +37,14 @@ export default function Dashboard({
   upcoming: { id: string; title: string; site: string; dueDate: string; priority: string; assignees: number }[];
   activity: { id: string; action: string; detail: string | null; user: string | null; createdAt: string }[];
   receivables: { total: number; outstanding: number; overdue: number };
+  mapWorkers: MapWorker[];
+  mapSites: MapSite[];
 }) {
   return (
     <Shell title="Live Workforce Dashboard" subtitle="Real-time status across every active site">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <WorkforceMap workers={mapWorkers} sites={mapSites} />
+
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Workforce" value={stats.workers} sub={`${stats.busy} busy · ${stats.free} free`} accent="brand" />
         <StatCard label="Active Sites" value={stats.activeSites} sub={`${sites.length} total sites`} accent="blue" />
         <StatCard label="Open Tasks" value={stats.openTasks} sub={`${stats.overdueTasks} overdue`} accent={stats.overdueTasks > 0 ? "red" : "emerald"} />
@@ -151,6 +165,7 @@ export async function getServerSideProps(ctx: GetServerSidePropsContext) {
   const statusData = [
     { name: "Not Started", value: statusMap["NOT_STARTED"] ?? 0 },
     { name: "In Progress", value: statusMap["IN_PROGRESS"] ?? 0 },
+    { name: "Blocked", value: statusMap["BLOCKED"] ?? 0 },
     { name: "Completed", value: statusMap["COMPLETED"] ?? 0 },
   ];
 
@@ -193,7 +208,7 @@ export async function getServerSideProps(ctx: GetServerSidePropsContext) {
   const upcoming = tasksSoon.map((t) => ({
     id: t.id,
     title: t.title,
-    site: t.site.name,
+    site: t.site?.name ?? "No site",
     dueDate: t.dueDate.toISOString(),
     priority: t.priority,
     assignees: t.assignments.length,
@@ -214,6 +229,11 @@ export async function getServerSideProps(ctx: GetServerSidePropsContext) {
 
   const completedThisMonth = await prisma.task.count({ where: { status: TaskStatus.COMPLETED, completedAt: { gte: monthStart } } });
 
+  const mapSites = await prisma.site.findMany({
+    select: { id: true, name: true, code: true, lat: true, lng: true, radiusM: true },
+    orderBy: { name: "asc" },
+  });
+
   return {
     props: {
       stats: {
@@ -232,6 +252,19 @@ export async function getServerSideProps(ctx: GetServerSidePropsContext) {
       upcoming,
       activity: activityOut,
       receivables: { total, outstanding, overdue },
+      mapWorkers: board.cards.map((c) => ({
+        id: c.id,
+        name: c.name,
+        jobTitle: c.jobTitle,
+        lat: c.lat,
+        lng: c.lng,
+        lastSeenAt: c.lastSeenAt,
+        busy: !!c.current.siteId,
+        siteName: c.current.siteName,
+        siteLat: c.current.siteLat,
+        siteLng: c.current.siteLng,
+      })),
+      mapSites,
     },
   };
 }

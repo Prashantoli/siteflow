@@ -3,19 +3,20 @@ import { getSession } from "next-auth/react";
 import { useEffect, useState } from "react";
 import Shell from "@/components/Shell";
 import DualDatePicker from "@/components/DualDatePicker";
-import { Modal, Badge, Progress, EmptyState, fmtDate } from "@/components/ui";
+import { Modal, Badge, Progress, EmptyState, fmtDate, fmtDateTime } from "@/components/ui";
 import { TASK_STATUS_LABEL, TASK_STATUS_COLOR, PRIORITY_COLOR } from "@/lib/workforce";
 import { homeFor, isManagement } from "@/lib/rbac";
 
 type Assignment = { userId: string; user: { id: string; name: string; jobTitle: string | null } };
 type Task = {
   id: string; title: string; description: string | null; status: string; priority: string;
-  startDate: string; dueDate: string; progress: number; estimatedHours: number;
-  site: { id: string; name: string; code: string };
+  startDate: string; dueDate: string; progress: number; estimatedHours: number; blockerNote: string | null;
+  site: { id: string; name: string; code: string } | null;
   crew: { id: string; name: string } | null;
   createdBy: { id: string; name: string };
   assignments: Assignment[];
 };
+type Comment = { id: string; body: string; createdAt: string; user: { id: string; name: string; role: string } };
 
 type WorkerOption = { id: string; name: string; jobTitle: string | null; status: string };
 type CrewOption = { id: string; name: string; members: { userId: string }[] };
@@ -38,10 +39,34 @@ export default function TasksPage({ canManage }: { canManage: boolean }) {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [threadTask, setThreadTask] = useState<Task | null>(null);
+  const [thread, setThread] = useState<Comment[]>([]);
+  const [reply, setReply] = useState("");
 
   async function load() {
     const res = await fetch("/api/tasks");
     if (res.ok) setTasks((await res.json()).tasks);
+  }
+
+  async function openThread(t: Task) {
+    setThreadTask(t);
+    setReply("");
+    const res = await fetch(`/api/task-comments?taskId=${t.id}`);
+    if (res.ok) setThread((await res.json()).comments);
+  }
+
+  async function sendReply() {
+    if (!threadTask || !reply.trim()) return;
+    const res = await fetch("/api/task-comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ taskId: threadTask.id, body: reply.trim() }),
+    });
+    if (res.ok) {
+      setReply("");
+      const fresh = await fetch(`/api/task-comments?taskId=${threadTask.id}`);
+      if (fresh.ok) setThread((await fresh.json()).comments);
+    }
   }
 
   useEffect(() => {
@@ -77,7 +102,7 @@ export default function TasksPage({ canManage }: { canManage: boolean }) {
       body: JSON.stringify({
         title: form.title,
         description: form.description || null,
-        siteId: form.siteId,
+        siteId: form.siteId || null,
         priority: form.priority,
         startDate: form.startDate,
         dueDate: form.dueDate,
@@ -112,7 +137,7 @@ export default function TasksPage({ canManage }: { canManage: boolean }) {
   }
 
   const filtered = tasks.filter((t) =>
-    (filterSite === "ALL" || t.site.id === filterSite) &&
+    (filterSite === "ALL" || t.site?.id === filterSite) &&
     (filterStatus === "ALL" || t.status === filterStatus) &&
     (q === "" || t.title.toLowerCase().includes(q.toLowerCase()))
   );
@@ -130,6 +155,7 @@ export default function TasksPage({ canManage }: { canManage: boolean }) {
             <option value="ALL">All statuses</option>
             <option value="NOT_STARTED">Not Started</option>
             <option value="IN_PROGRESS">In Progress</option>
+            <option value="BLOCKED">Blocked</option>
             <option value="COMPLETED">Completed</option>
           </select>
         </div>
@@ -154,8 +180,11 @@ export default function TasksPage({ canManage }: { canManage: boolean }) {
                       {overdue && <Badge className="bg-red-600 text-white">OVERDUE</Badge>}
                     </div>
                     {t.description ? <p className="mt-1 text-xs text-slate-600">{t.description}</p> : null}
+                    {t.status === "BLOCKED" && t.blockerNote && (
+                      <p className="mt-1.5 rounded-lg bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-700">🚫 Worker reports: {t.blockerNote}</p>
+                    )}
                     <p className="mt-1.5 text-xs text-slate-500">
-                      🏗️ {t.site.name} · 🗓 {fmtDate(t.startDate)} → {fmtDate(t.dueDate)} · ⏱ {t.estimatedHours}h est · created by {t.createdBy.name}
+                      🏗️ {t.site ? t.site.name : "No site (admin work)"} · 🗓 {fmtDate(t.startDate)} → {fmtDate(t.dueDate)} · ⏱ {t.estimatedHours}h est · created by {t.createdBy.name}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {t.assignments.map((a) => (
@@ -178,6 +207,7 @@ export default function TasksPage({ canManage }: { canManage: boolean }) {
                         {t.status !== "COMPLETED" && (
                           <button className="btn-primary !px-2.5 !py-1 text-[11px]" disabled={busy} onClick={() => patch(t.id, { status: "COMPLETED" })}>✔ Complete</button>
                         )}
+                        <button className="btn-outline !px-2.5 !py-1 text-[11px]" onClick={() => openThread(t)}>💬</button>
                         <button className="btn-outline !px-2.5 !py-1 text-[11px] text-red-600" onClick={() => remove(t)}>Delete</button>
                       </div>
                     )}
@@ -194,9 +224,9 @@ export default function TasksPage({ canManage }: { canManage: boolean }) {
           <div className="sm:col-span-2"><label className="label">Title</label><input className="input" required minLength={3} value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></div>
           <div className="sm:col-span-2"><label className="label">Description / instructions</label><textarea className="input" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
           <div>
-            <label className="label">Site</label>
-            <select className="input" required value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>
-              <option value="">— Select site —</option>
+            <label className="label">Site (optional — admin/self tasks can skip this)</label>
+            <select className="input" value={form.siteId} onChange={(e) => setForm({ ...form, siteId: e.target.value })}>
+              <option value="">— No site —</option>
               {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
@@ -239,8 +269,8 @@ export default function TasksPage({ canManage }: { canManage: boolean }) {
               <input type="checkbox" checked={form.notify} onChange={(e) => setForm({ ...form, notify: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
               🔔 Auto-notify assignees (push + email; SMS when urgent)
             </label>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={form.deployNow} onChange={(e) => setForm({ ...form, deployNow: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
+            <label className={`flex items-center gap-2 text-sm ${form.siteId ? "text-slate-700" : "text-slate-300"}`}>
+              <input type="checkbox" checked={form.deployNow && !!form.siteId} disabled={!form.siteId} onChange={(e) => setForm({ ...form, deployNow: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-brand-600" />
               📍 Mark workers as deployed to this site now
             </label>
           </div>
@@ -248,11 +278,32 @@ export default function TasksPage({ canManage }: { canManage: boolean }) {
           {error && <p className="sm:col-span-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
           <div className="flex justify-end gap-2 sm:col-span-2">
             <button type="button" className="btn-outline" onClick={() => setModal(false)}>Cancel</button>
-            <button className="btn-primary" disabled={busy || form.assigneeIds.length === 0}>
+            <button className="btn-primary" disabled={busy || (form.assigneeIds.length === 0 && !form.siteId)}>
               {busy ? "Creating…" : "Assign task"}
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Comment thread modal */}
+      <Modal open={!!threadTask} onClose={() => setThreadTask(null)} title={`💬 ${threadTask?.title ?? ""}`} wide>
+        <div className="max-h-80 space-y-2 overflow-y-auto">
+          {thread.map((c) => (
+            <div key={c.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm">
+              <p className="font-semibold text-slate-700">
+                {c.user.name}
+                {c.user.role !== "EMPLOYEE" && <span className="ml-1 rounded bg-brand-100 px-1 text-[10px] font-bold text-brand-700">MANAGER</span>}
+                <span className="ml-1 text-xs font-normal text-slate-400">{fmtDateTime(c.createdAt)}</span>
+              </p>
+              <p className="mt-0.5 whitespace-pre-wrap text-slate-600">{c.body}</p>
+            </div>
+          ))}
+          {thread.length === 0 && <p className="py-4 text-center text-sm text-slate-400">No comments yet.</p>}
+        </div>
+        <div className="mt-3 flex gap-2">
+          <input className="input" placeholder="Reply to the crew…" value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendReply(); } }} />
+          <button className="btn-primary !px-4" disabled={!reply.trim()} onClick={sendReply}>Send</button>
+        </div>
       </Modal>
     </Shell>
   );

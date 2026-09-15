@@ -20,6 +20,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
     items: [
       { href: "/portal/sites", label: "Sites", icon: "🏗️", roles: ["ADMIN", "MANAGER"] },
       { href: "/portal/tasks", label: "Tasks", icon: "✅", roles: ["ADMIN", "MANAGER"] },
+      { href: "/portal/issues", label: "Issues", icon: "⚠️", roles: ["ADMIN", "MANAGER"] },
       { href: "/portal/workforce", label: "Workforce", icon: "👷", roles: ["ADMIN", "MANAGER"] },
       { href: "/portal/crews", label: "Crews", icon: "🧰", roles: ["ADMIN", "MANAGER"] },
       { href: "/portal/attendance", label: "Attendance", icon: "🕐", roles: ["ADMIN", "MANAGER"] },

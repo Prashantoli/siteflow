@@ -25,6 +25,7 @@ enum Role {
 enum TaskStatus {
   NOT_STARTED
   IN_PROGRESS
+  BLOCKED
   COMPLETED
 }
 
@@ -73,6 +74,13 @@ enum WorkdayStatus {
   ABSENT
 }
 
+enum IssueStatus {
+  OPEN
+  IN_REVIEW
+  RESOLVED
+  DISMISSED
+}
+
 // -----------------------------
 // Core models
 // -----------------------------
@@ -106,6 +114,9 @@ model User {
   boqs            Boq[]            @relation("BoqCreator")
   purchaseOrders  PurchaseOrder[]  @relation("PoCreator")
   salesOrders     SalesOrder[]     @relation("SoCreator")
+  taskComments    TaskComment[]
+  raisedIssues    Issue[]          @relation("IssueRaiser")
+  resolvedIssues  Issue[]          @relation("IssueResolver")
 
   @@map("users")
 }
@@ -137,6 +148,7 @@ model Site {
   boqs           Boq[]
   purchaseOrders PurchaseOrder[]
   salesOrders    SalesOrder[]
+  issues         Issue[]
 
   @@map("sites")
 }
@@ -186,7 +198,7 @@ model Task {
   id             String       @id @default(cuid())
   title          String
   description    String?
-  siteId         String
+  siteId         String?
   status         TaskStatus   @default(NOT_STARTED)
   priority       TaskPriority @default(MEDIUM)
   startDate      DateTime
@@ -194,20 +206,62 @@ model Task {
   completedAt    DateTime?
   estimatedHours Float        @default(0)
   progress       Int          @default(0) // 0–100
+  blockerNote    String? // why the task is blocked (set by the worker)
   createdById    String
   crewId         String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  site        Site             @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  site        Site?            @relation(fields: [siteId], references: [id], onDelete: Cascade)
   createdBy   User             @relation("TaskCreator", fields: [createdById], references: [id])
   crew        Crew?            @relation(fields: [crewId], references: [id], onDelete: SetNull)
   assignments TaskAssignment[]
+  comments    TaskComment[]
   deployments Deployment[]
+  Issue       Issue[]
 
   @@index([siteId])
   @@index([status])
   @@map("tasks")
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  taskId    String
+  userId    String
+  body      String
+  createdAt DateTime @default(now())
+
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([taskId, createdAt])
+  @@map("task_comments")
+}
+
+model Issue {
+  id             String       @id @default(cuid())
+  title          String
+  description    String?
+  category       String       @default("OTHER") // SAFETY | EQUIPMENT | MATERIAL | SITE | PAYROLL | OTHER
+  priority       TaskPriority @default(MEDIUM)
+  status         IssueStatus  @default(OPEN)
+  siteId         String?
+  taskId         String?
+  raisedById     String
+  resolutionNote String?
+  resolvedById   String?
+  resolvedAt     DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  site       Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  task       Task? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  raisedBy   User  @relation("IssueRaiser", fields: [raisedById], references: [id])
+  resolvedBy User? @relation("IssueResolver", fields: [resolvedById], references: [id])
+
+  @@index([status, createdAt])
+  @@map("issues")
 }
 
 model TaskAssignment {
